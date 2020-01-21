@@ -1,6 +1,8 @@
 pub fn main(puzzle_input: &String) {
     if let Some(context) = Context::parse(puzzle_input) {
-        println!("Part 1: {}", part_1(&context));
+        let (part_1, part_2) = count_valid(&context);
+        println!("Part 1: {}", part_1);
+        println!("Part 2: {}", part_2);
     };
 }
 
@@ -23,6 +25,10 @@ impl Context {
         }
     }
 
+    fn contains(&self, number: u32) -> bool {
+        number >= self.start && number <= self.stop
+    }
+
     fn parse(string: &str) -> Option<Self> {
         let mut elems = string.trim().split("-");
         let start = match elems.next().unwrap_or("").parse() {
@@ -38,80 +44,94 @@ impl Context {
 }
 
 #[derive(Debug, PartialEq)]
-struct Part1State<'a> {
+struct State<'a> {
     context: &'a Context,
     number: u32,
     magnitude: u32,
     has_pair: bool,
+    has_true_pair: bool,
+    streak: u8,
 }
 
-impl<'a> Part1State<'a> {
-    fn init(context: &'a Context) -> Part1State<'a> {
-        Part1State {
+impl<'a> State<'a> {
+    fn init(context: &'a Context) -> State<'a> {
+        State {
             context,
             number: 0,
             magnitude: 0,
             has_pair: false,
+            has_true_pair: false,
+            streak: 0,
         }
-    }
-
-    fn add_digit(&self, digit: u32) -> Option<Self> {
-        if self.magnitude == 0 {
-            return Some(Part1State {
-                number: digit,
-                magnitude: 1,
-                ..*self
-            });
-        };
-
-        let last_digit = self.number / self.magnitude;
-        if digit > last_digit {
-            return None;
-        };
-
-        let magnitude = self.magnitude * 10;
-        Some(Part1State {
-            number: self.number + digit * magnitude,
-            has_pair: self.has_pair || digit == last_digit,
-            magnitude,
-            ..*self
-        })
     }
 
     fn next_states(&self) -> Vec<Self> {
+        let (last_digit, magnitude) = if self.magnitude > 0 {
+            (self.number / self.magnitude, self.magnitude * 10)
+        } else {
+            (9, 1)
+        };
+
         let mut states = Vec::new();
-        for digit in self.context.start_digit..10 {
-            if let Some(state) = self.add_digit(digit) {
-                states.push(state);
-            }
+
+        for digit in self.context.start_digit..last_digit + 1 {
+            let (has_pair, has_true_pair, streak) = if self.magnitude > 0 {
+                (
+                    self.has_pair || digit == last_digit,
+                    self.has_true_pair || (digit != last_digit && self.streak == 2),
+                    if digit == last_digit {
+                        self.streak + 1
+                    } else {
+                        1
+                    },
+                )
+            } else {
+                (false, false, 1)
+            };
+
+            states.push(State {
+                number: self.number + digit * magnitude,
+                magnitude,
+                has_pair,
+                has_true_pair,
+                streak,
+                ..*self
+            });
         }
+
         states
     }
 
-    fn is_final(&self) -> bool {
-        self.magnitude == Context::MAX
+    fn part_1_valid(&self) -> bool {
+        self.has_pair
     }
 
-    fn is_valid(&self) -> bool {
-        self.has_pair && self.number <= self.context.stop && self.number >= self.context.start
+    fn part_2_valid(&self) -> bool {
+        self.has_true_pair || (self.streak == 2 && (self.number / 10_000) % 11 == 0)
     }
 }
 
-fn part_1(context: &Context) -> u32 {
+fn count_valid(context: &Context) -> (u32, u32) {
     let mut stack = Vec::new();
-    let mut count: u32 = 0;
+    let (mut count_1, mut count_2) = (0, 0);
 
-    stack.push(Part1State::init(context));
+    stack.push(State::init(context));
     while stack.len() > 0 {
         let state = stack.pop().unwrap();
-        if !state.is_final() {
+
+        if state.magnitude < Context::MAX {
             stack.append(&mut state.next_states());
-        } else if state.is_valid() {
-            count += 1;
+        } else if context.contains(state.number) {
+            if state.part_1_valid() {
+                count_1 += 1;
+            }
+            if state.part_2_valid() {
+                count_2 += 1;
+            }
         };
     }
 
-    count
+    (count_1, count_2)
 }
 
 #[cfg(test)]
@@ -121,7 +141,7 @@ mod tests {
     #[test]
     fn test_next_states_1() {
         let context = Context::new(900_000, 999_999);
-        let state = Part1State::init(&context);
+        let state = State::init(&context);
         let next_states = state.next_states();
         assert_eq!(1, next_states.len());
 
@@ -134,43 +154,51 @@ mod tests {
     #[test]
     fn test_next_states_2() {
         let context = Context::new(800_000, 999_999);
-        let state = Part1State::init(&context);
+        let state = State::init(&context);
         let expected = vec![
-            Part1State {
+            State {
                 context: &context,
                 number: 8,
                 magnitude: 1,
                 has_pair: false,
+                has_true_pair: false,
+                streak: 1,
             },
-            Part1State {
+            State {
                 context: &context,
                 number: 9,
                 magnitude: 1,
                 has_pair: false,
+                has_true_pair: false,
+                streak: 1,
             },
         ];
         assert_eq!(expected, state.next_states());
 
         let expected_2 = vec![
-            Part1State {
+            State {
                 context: &context,
                 number: 89,
                 magnitude: 10,
                 has_pair: false,
+                has_true_pair: false,
+                streak: 1,
             },
-            Part1State {
+            State {
                 context: &context,
                 number: 99,
                 magnitude: 10,
                 has_pair: true,
+                has_true_pair: false,
+                streak: 2,
             },
         ];
         assert_eq!(expected_2, expected[1].next_states());
     }
 
     #[test]
-    fn test_part_1() {
-        assert_eq!(1, part_1(&Context::new(111_111, 111_111)));
+    fn test_count_valid() {
+        assert_eq!((1, 0), count_valid(&Context::new(111_111, 111_111)));
     }
 
     #[test]
